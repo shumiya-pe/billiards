@@ -268,11 +268,15 @@ export function makeTable(shape = 'rect', pocketSize = 'm') {
   }
 }
 
+// プレイヤー表示名（2人モード用）
+export const playerLabel = (i) => `プレイヤー${i + 1}`
+
 // ===== ゲーム生成 =====
 export function createGame(options = {}) {
   const mode = LABEL_MODES.includes(options.mode) ? options.mode : 'number'
   const caseMode = options.caseMode || 'upper'
   const ballCount = [3, 5, 9].includes(options.ballCount) ? options.ballCount : 9
+  const players = options.players === 2 ? 2 : 1
   const label = makeLabeler(mode, caseMode, ballCount)
   const table = makeTable(options.shape, options.pocketSize)
 
@@ -294,6 +298,7 @@ export function createGame(options = {}) {
       isCue: false, order, label: label(order),
       color: isMoney ? MONEY_COLOR : BALL_COLORS[order], stripe: isMoney,
       x: s.x, y: s.y, vx: 0, vy: 0, active: true,
+      pocketedBy: null, // 落としたプレイヤーの番号（スコアトレイ表示用）
     }
   })
   balls.push({
@@ -303,9 +308,12 @@ export function createGame(options = {}) {
   return {
     balls, table, mode, caseMode, ballCount, rackSpots: spots,
     autoScroll: !!options.autoScroll,
+    players, current: 0, winner: null,
     phase: 'ballInHand',
     target: 1, shots: 0, fouls: 0,
-    message: 'しろたまを おくところを タップしてね',
+    message: players === 2
+      ? `${playerLabel(0)}から！しろたまを おくところを タップしてね`
+      : 'しろたまを おくところを タップしてね',
   }
 }
 
@@ -449,6 +457,7 @@ function findRespot(game) {
 export function resolveShot(game, shotInfo) {
   game.shots += 1
   const cue = cueBall(game)
+  const shooter = game.current
   const target = game.target
   const winOrder = game.ballCount // 最後のボール＝勝ちボール
   const targetRef = refOf(game, target)
@@ -459,10 +468,20 @@ export function resolveShot(game, shotInfo) {
   const foul = scratch || wrongFirst || noHit
   const pottedAny = shotInfo.pocketed.some((o) => o > 0)
 
+  // 落ちたボールに「だれが おとしたか」を記録（スコアトレイ表示用）
+  for (const o of shotInfo.pocketed) {
+    if (o === 0) continue
+    const b = game.balls.find((x) => !x.isCue && x.order === o)
+    if (b) b.pocketedBy = shooter
+  }
+
   if (pocketedWin) {
     if (!foul) {
       game.phase = 'won'
-      game.message = `🏆 ${refOf(game, winOrder)} イン！クリア！`
+      game.winner = shooter
+      game.message = game.players === 2
+        ? `🏆 ${refOf(game, winOrder)} イン！${playerLabel(shooter)}の かち！`
+        : `🏆 ${refOf(game, winOrder)} イン！クリア！`
       return game
     }
     const moneyBall = game.balls.find((b) => b.order === winOrder && !b.isCue)
@@ -470,6 +489,7 @@ export function resolveShot(game, shotInfo) {
     moneyBall.x = spot.x
     moneyBall.y = spot.y
     moneyBall.active = true
+    moneyBall.pocketedBy = null
   }
 
   game.target = lowestActive(game) ?? 9
@@ -477,15 +497,24 @@ export function resolveShot(game, shotInfo) {
   if (foul) {
     game.fouls += 1
     cue.active = false
+    if (game.players === 2) game.current = 1 - game.current
     game.phase = 'ballInHand'
     if (scratch) game.message = 'ファウル！しろたまを おきなおしてね'
     else if (wrongFirst) game.message = `ファウル！${targetRef}に さきに あてよう`
     else game.message = 'ファウル！どれにも あたらなかったよ'
+    if (game.players === 2) game.message += `（${playerLabel(game.current)}に こうたい）`
     return game
   }
 
   game.phase = 'aiming'
-  game.message = pottedAny ? 'ナイスイン！つぎを ねらおう' : `${refOf(game, game.target)}を ねらおう`
+  if (game.players === 2 && !pottedAny) {
+    game.current = 1 - game.current
+    game.message = `こうたい！${playerLabel(game.current)}は ${refOf(game, game.target)}を ねらおう`
+  } else if (game.players === 2 && pottedAny) {
+    game.message = 'ナイスイン！つづけて ねらおう'
+  } else {
+    game.message = pottedAny ? 'ナイスイン！つぎを ねらおう' : `${refOf(game, game.target)}を ねらおう`
+  }
   return game
 }
 

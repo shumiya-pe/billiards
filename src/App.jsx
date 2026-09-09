@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   R, RAIL,
   SHOT_MAX_SPEED, FIXED_DT,
-  createGame, cueBall, targetBall, canPlaceCue, placeCue, advance, allStopped, resolveShot, aimFromDrag, readingOf,
+  createGame, cueBall, objectBalls, targetBall, canPlaceCue, placeCue, advance, allStopped, resolveShot, aimFromDrag, readingOf, playerLabel,
 } from './billiards.js'
 
 const APP_VERSION = __APP_VERSION__
@@ -11,7 +11,10 @@ const THEME_COLOR = '#1565c0'
 const FELT_GREEN = '#1f7a44'
 const RAIL_WOOD = '#6d4726'
 
-const DEFAULT_OPTIONS = { mode: 'number', caseMode: 'upper', shape: 'rect', pocketSize: 'm', ballCount: 9, autoScroll: false }
+const DEFAULT_OPTIONS = { mode: 'number', caseMode: 'upper', shape: 'rect', pocketSize: 'm', ballCount: 9, autoScroll: false, players: 1 }
+
+// 2人モードのプレイヤーカラー（バッジ・手番表示）
+const PLAYER_COLORS = ['#1565c0', '#f4511e']
 
 // 横スクロール用の左右余白（ワールド単位）。端からのショットでキューを引く余地を作る。
 const MARGIN = 175
@@ -267,6 +270,63 @@ function BallChip({ label, color = '#ccc', stripe = false, size = 28 }) {
   )
 }
 
+// ===== ボールトレイ（余白に残り球を順番に並べ、落とした球は誰が落としたかを表示）=====
+function BallTray({ balls, players }) {
+  return (
+    <div style={styles.tray}>
+      {balls.map((b) => (
+        <span key={b.order} style={{ position: 'relative', display: 'inline-flex' }}>
+          <span style={b.active ? undefined : { filter: 'grayscale(0.75)', opacity: 0.4, display: 'inline-flex' }}>
+            <BallChip label={b.label} color={b.color} stripe={b.stripe} size={26} />
+          </span>
+          {!b.active && (
+            <span
+              style={{
+                ...styles.trayBadge,
+                background: players === 2 && b.pocketedBy != null ? PLAYER_COLORS[b.pocketedBy] : '#4caf50',
+              }}
+            >
+              {players === 2 && b.pocketedBy != null ? b.pocketedBy + 1 : '✓'}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+// ===== 手番＆スコアバー（2人モードのみ）=====
+function PlayerBar({ balls, current, phase, winner }) {
+  const counts = [0, 0]
+  for (const b of balls) {
+    if (!b.active && b.pocketedBy != null) counts[b.pocketedBy] += 1
+  }
+  return (
+    <div style={styles.playerBar}>
+      {[0, 1].map((i) => {
+        const isTurn = phase === 'won' ? winner === i : current === i
+        return (
+          <div
+            key={i}
+            style={{
+              ...styles.playerCard,
+              border: `3px solid ${isTurn ? PLAYER_COLORS[i] : 'transparent'}`,
+              background: isTurn ? '#fff' : 'rgba(255,255,255,0.5)',
+              color: isTurn ? '#1a1a2e' : '#999',
+            }}
+          >
+            {phase !== 'won' && isTurn && <span style={{ color: PLAYER_COLORS[i], fontSize: 11 }}>▶</span>}
+            {phase === 'won' && winner === i && <span>🏆</span>}
+            <span style={{ ...styles.playerDot, background: PLAYER_COLORS[i] }}>{i + 1}</span>
+            <span>{playerLabel(i)}</span>
+            <span style={{ fontWeight: 800 }}>{counts[i]}こ</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 const styles = {
   container: {
     minHeight: '100dvh',
@@ -322,6 +382,61 @@ const styles = {
     fontWeight: 800,
     color: THEME_COLOR,
     padding: '0 16px',
+  },
+  tray: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 5,
+    padding: '2px 12px 4px',
+    flexWrap: 'wrap',
+  },
+  trayBadge: {
+    position: 'absolute',
+    right: -4,
+    bottom: -3,
+    width: 14,
+    height: 14,
+    borderRadius: '50%',
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: 800,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+  },
+  playerBar: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: 8,
+    padding: '2px 16px 4px',
+  },
+  playerCard: {
+    flex: '1 1 0',
+    maxWidth: 180,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    padding: '5px 6px',
+    borderRadius: 12,
+    fontSize: 12,
+    fontWeight: 700,
+    whiteSpace: 'nowrap',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+  },
+  playerDot: {
+    width: 18,
+    height: 18,
+    borderRadius: '50%',
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 800,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   canvasWrap: { padding: '4px 12px 8px', display: 'flex', justifyContent: 'center' },
   panBar: { display: 'flex', gap: 8, padding: '0 16px', justifyContent: 'center' },
@@ -419,7 +534,8 @@ function GuideModal({ onClose }) {
         <p style={styles.modalText}>① しろたまを おくところを <b>タップ</b></p>
         <p style={styles.modalText}>② がめんを <b>ドラッグ</b>して むき と つよさを きめる（うしろに ひくほど つよい）</p>
         <p style={styles.modalText}>③ ゆびを <b>はなす</b>と ショット！</p>
-        <p style={styles.modalText}>つぎに ねらう ボールは うえに でるよ。</p>
+        <p style={styles.modalText}>つぎに ねらう ボールは うえに でるよ。のこりの ボールは じゅんばんに ならんでいて、おとした ボールは うすくなって だれが おとしたか マークが つくよ。</p>
+        <p style={styles.modalText}>⚙️で <b>ふたりで こうたい</b>を えらぶと 2人で あそべるよ。いれたら つづけて、はずしたら こうたい！</p>
         <p style={styles.modalText}>はしを ねらうときは、したの スライダーや ボタンで フィールドを よこに うごかせるよ。⚙️で「じどう よこスクロール」を オンにもできるよ。</p>
         <p style={styles.modalText}>⚙️から <b>すうじ / えいご / かんすうじ / ローマ / ギリシャ</b>、テーブルの <b>かたち</b>、<b>あなの おおきさ</b>、<b>ボールの かず</b>を えらべるよ。</p>
         <button style={styles.closeBtn} onClick={onClose}>とじる</button>
@@ -462,10 +578,22 @@ function SettingsModal({ options, onApply, onReset, onClose }) {
   const [pocketSize, setPocketSize] = useState(options.pocketSize)
   const [ballCount, setBallCount] = useState(options.ballCount)
   const [autoScroll, setAutoScroll] = useState(options.autoScroll)
+  const [players, setPlayers] = useState(options.players || 1)
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={{ ...styles.modal, maxHeight: '86vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalTitle}>せってい</div>
+
+        <div style={SECTION}>あそぶ にんずう</div>
+        <div style={ROW}>
+          <Pill active={players === 1} onClick={() => setPlayers(1)}>ひとりで</Pill>
+          <Pill active={players === 2} onClick={() => setPlayers(2)}>ふたりで こうたい</Pill>
+        </div>
+        {players === 2 && (
+          <p style={{ ...styles.modalText, fontSize: 13, color: '#888' }}>
+            ※ ポケットに いれたら つづけて うてるよ。はずしたり ファウルしたら こうたい！
+          </p>
+        )}
 
         <div style={SECTION}>ボールの かず</div>
         <div style={ROW}>
@@ -524,7 +652,7 @@ function SettingsModal({ options, onApply, onReset, onClose }) {
           ※ オンにすると、ねらう ドラッグが はしに きたとき じどうで スクロールします
         </p>
 
-        <button style={{ ...styles.closeBtn, marginTop: 8 }} onClick={() => onApply({ mode, caseMode, shape, pocketSize, ballCount, autoScroll })}>
+        <button style={{ ...styles.closeBtn, marginTop: 8 }} onClick={() => onApply({ mode, caseMode, shape, pocketSize, ballCount, autoScroll, players })}>
           このせっていで はじめる
         </button>
         <button
@@ -540,6 +668,28 @@ function SettingsModal({ options, onApply, onReset, onClose }) {
   )
 }
 
+// ゲーム状態から React に渡す表示用スナップショットを作る
+function readUi(g) {
+  const tb = targetBall(g)
+  return {
+    phase: g.phase,
+    target: g.target,
+    targetLabel: tb ? tb.label : '',
+    targetColor: tb ? tb.color : '#ccc',
+    targetStripe: tb ? tb.stripe : false,
+    targetReading: readingOf(g, g.target),
+    message: g.message,
+    shots: g.shots,
+    fouls: g.fouls,
+    players: g.players,
+    current: g.current,
+    winner: g.winner,
+    balls: objectBalls(g)
+      .map((b) => ({ order: b.order, label: b.label, color: b.color, stripe: b.stripe, active: b.active, pocketedBy: b.pocketedBy }))
+      .sort((a, b) => a.order - b.order),
+  }
+}
+
 export default function App() {
   const canvasRef = useRef(null)
   const gameRef = useRef(createGame(DEFAULT_OPTIONS))
@@ -548,6 +698,7 @@ export default function App() {
   const fitRef = useRef(null)
   const camRef = useRef(0) // フィールドの横スクロール量（ワールド単位、-MARGIN..+MARGIN）
   const sliderRef = useRef(null)
+  if (import.meta.env.DEV) window.__gameRef = gameRef // 開発時のみ：E2Eテスト用フック
 
   const panTo = (v) => {
     camRef.current = clamp(v, -MARGIN, MARGIN)
@@ -558,26 +709,8 @@ export default function App() {
   const [showGuide, setShowGuide] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [options, setOptions] = useState(DEFAULT_OPTIONS)
-  const [ui, setUi] = useState({
-    phase: 'ballInHand', target: 1, targetLabel: '1', targetColor: '#f6c500', targetStripe: false,
-    targetReading: 'いち', message: '', shots: 0, fouls: 0,
-  })
-
-  const syncUI = () => {
-    const g = gameRef.current
-    const tb = targetBall(g)
-    setUi({
-      phase: g.phase,
-      target: g.target,
-      targetLabel: tb ? tb.label : '',
-      targetColor: tb ? tb.color : '#ccc',
-      targetStripe: tb ? tb.stripe : false,
-      targetReading: readingOf(g, g.target),
-      message: g.message,
-      shots: g.shots,
-      fouls: g.fouls,
-    })
-  }
+  const [ui, setUi] = useState(() => readUi(gameRef.current))
+  const syncUI = () => setUi(readUi(gameRef.current))
 
   const startGame = (opts) => {
     setOptions(opts)
@@ -795,6 +928,11 @@ export default function App() {
 
       <div style={styles.message}>{ui.message || hint}</div>
 
+      <BallTray balls={ui.balls} players={ui.players} />
+      {ui.players === 2 && (
+        <PlayerBar balls={ui.balls} current={ui.current} phase={ui.phase} winner={ui.winner} />
+      )}
+
       <div style={styles.canvasWrap}>
         <canvas ref={canvasRef} style={styles.canvas} />
       </div>
@@ -832,7 +970,14 @@ export default function App() {
         <div style={styles.overlay}>
           <div style={styles.winCard}>
             <div style={{ fontSize: 56 }}>🏆</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: '#1a1a2e', margin: '8px 0' }}>クリア！</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: ui.players === 2 && ui.winner != null ? PLAYER_COLORS[ui.winner] : '#1a1a2e', margin: '8px 0' }}>
+              {ui.players === 2 && ui.winner != null ? `${playerLabel(ui.winner)}の かち！` : 'クリア！'}
+            </div>
+            {ui.players === 2 && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                <BallTray balls={ui.balls} players={ui.players} />
+              </div>
+            )}
             <div style={{ fontSize: 16, fontWeight: 700, color: '#666', marginBottom: 20 }}>
               {ui.shots} ショット・ファウル {ui.fouls}かい
             </div>
