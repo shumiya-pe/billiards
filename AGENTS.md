@@ -18,7 +18,10 @@ shumiya 教育アプリシリーズの一員。**シリーズ共通仕様の正�
 ## リポジトリ運用（要点）
 
 - 独立した Git リポジトリとして扱う。コミット・push・status 確認はこのリポジトリ内で行う
-- `main` 単一ブランチ・コミットメッセージは英語命令形・main への push で Vercel が自動デプロイ
+- **`main` は統合ブランチ、`release` が本番ブランチ**（2026-09-09〜）。`main` への push は
+  Vercel の Preview デプロイまでで、**公開はされない**。公開は `release` への fast-forward 昇格でのみ起きる
+- 公開は bun-hq の `/merge-ai <リポジトリ> --publish` で行う。`release` に直接コミットを作らない
+- コミットメッセージは英語命令形
 - 機能を変えたら `package.json` の version（semver）と `CHANGELOG.md` を必ず更新する
 - 一時ファイル・生成物・秘密情報はコミットしない
 - シリーズ全体の方針・進捗・ストア展開に関わる変更は bun-hq 側（STATE / README / COMMON.md）への反映を検討する
